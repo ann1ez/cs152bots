@@ -8,7 +8,10 @@ class State(Enum):
     MESSAGE_IDENTIFIED = auto()
     BROAD_CAT_IDENTIFIED = auto()
     SPECIFIC_CAT_IDENTIFIED = auto()
-    FINAL_MESSAGE = auto()
+    OPTIONAL_MESSAGE = auto()
+    POST_VISIBILITY = auto()
+    USER_VISIBILITY = auto()
+    REPORT_FINISHING = auto()
     REPORT_COMPLETE = auto()
 
 class Report:
@@ -20,9 +23,12 @@ class Report:
         self.state = State.REPORT_START
         self.client = client
         self.message = None
+        # I added these attributes to help user inputted store information
         self.broadCategory = None
         self.specificCategory = None
         self.optionalMessage = None
+        self.postVisibility = None
+        self.userVisibility = None
     
     async def handle_message(self, message):
         '''
@@ -59,7 +65,7 @@ class Report:
             except discord.errors.NotFound:
                 return ["It seems this message was deleted or never existed. Please try again or say `cancel` to cancel."]
 
-            # Here we've found the message - it's up to you to decide what to do next!
+            # Here we've found the message - now have the user categorize it
             self.state = State.MESSAGE_IDENTIFIED
             reply =  "Enter `1` for Misinformation\n"
             reply += "Enter `2` for Dangerous or Illegal Content\n"
@@ -71,6 +77,7 @@ class Report:
                     "What is the reason you are reporting this message? (Choose from below.)\n" + reply]
           
         if self.state == State.BROAD_CAT_IDENTIFIED:
+            # TODO: Check if the input is valid
             # TODO: store this information about what broad category of abuse the message falls under
             self.broadCategory = message.content
             self.state = State.SPECIFIC_CAT_IDENTIFIED
@@ -104,25 +111,48 @@ class Report:
                 return ["Here are more options: (Choose from below).\n" + reply]
         
         if self.state == State.SPECIFIC_CAT_IDENTIFIED:
+            # TODO: Check if the input is valid
             self.specificCategory = message.content
+            self.state = State.OPTIONAL_MESSAGE
+            # Creating a reply variable so we can share link to CDC if user selected Covid-19 misinformation
             reply = ""
             if (self.broadCategory == '1') and (self.specificCategory == '2'):
                 reply = "\n\nAlso, here is the link to visit the CDC website for the latest information on Covid-19: https://www.cdc.gov/coronavirus/2019-ncov/index.html" 
-            self.state = State.FINAL_MESSAGE
             return["If you would like to add more information to your report, here is space to do so. Enter your message when you are ready to proceed." + reply]
         
-        if self.state == State.FINAL_MESSAGE:
+        if self.state == State.OPTIONAL_MESSAGE:
             self.optionalMessage = message.content
-            self.state = State.REPORT_COMPLETE
+            self.state = State.POST_VISIBILITY
+            reply = "Thank you for your report. It will be reviewed by our content moderation team, who will decide future action, including if the post should be removed or the user banned."
             if self.broadCategory == '1':
-                return["Thank you for your report. We will send this to our fact-checking partners and when misinformation is confimed, we will limit the content's distribution and warn other users."]
+                reply = "Thank you for your report. We will send this to our fact-checking partners and when misinformation is confimed, we will limit the content's distribution and warn other users."    
             if self.broadCategory== '2':
-                return["Thank you for your report. It will be reviewed by our content moderation team, who will decide future action, including any necessary reports to law enforcement. Thank you for trying to keep our platform safe."]
-            return["Thank you for your report. It will be reviewed by our content moderation team, who will decide future action, including if the post should be removed or the user banned."]
-
+                reply = "Thank you for your report. It will be reviewed by our content moderation team, who will decide future action, including any necessary reports to law enforcement. Thank you for trying to keep our platform safe."
+            return[reply + "\n\nWould you like to no longer see posts by this user? Please enter `yes` or `no`."]
+        
+        if self.state == State.POST_VISIBILITY:
+            self.postVisibility = message.content
+            if message.content == 'yes':
+                self.state = State.USER_VISIBILITY
+                return["We can mute this user, so you can no longer see their posts, or we can block them so they cannot contact you at all. Which would you prefer? Please choose `mute` or `block`."]
+            if message.content == 'no':
+                self.state = State.REPORT_FINISHING
+            
+        if self.state == State.USER_VISIBILITY:
+            self.userVisibility = message.content
+            self.state = State.REPORT_FINISHING
+        
+        if self.state == State.REPORT_FINISHING:
+            # This part deviates from our original flow
+            reply = "Thank you for your report! Here is the information we got from you:"
+            reply += "\nThe message you reported falls under " + self.broadCategory
+            reply += ", and if more specifically related to " + self.specificCategory
+            reply += "\nWould you like to no longer see posts from the user who made the post you are reporting? " + self.postVisibility        
+            self.state = State.REPORT_COMPLETE
+            return[reply]
+        
         return []
 
     def report_complete(self):
         return self.state == State.REPORT_COMPLETE
     
-
