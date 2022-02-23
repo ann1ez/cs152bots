@@ -1,143 +1,179 @@
-# bot.py
+from enum import Enum, auto
 import discord
-from discord.ext import commands
-import os
-import json
-import logging
 import re
-import requests
-from report import Report
 
-# Set up logging to the console
-logger = logging.getLogger('discord')
-logger.setLevel(logging.DEBUG)
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
-handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
-logger.addHandler(handler)
+class State(Enum):
+    REPORT_START = auto()
+    AWAITING_MESSAGE = auto()
+    MESSAGE_IDENTIFIED = auto()
+    BROAD_CAT_IDENTIFIED = auto()
+    SPECIFIC_CAT_IDENTIFIED = auto()
+    OPTIONAL_MESSAGE = auto()
+    POST_VISIBILITY = auto()
+    USER_VISIBILITY = auto()
+    REPORT_FINISHING = auto()
+    REPORT_COMPLETE = auto()
 
-# There should be a file called 'token.json' inside the same folder as this file
-token_path = 'tokens.json'
-if not os.path.isfile(token_path):
-    raise Exception(f"{token_path} not found!")
-with open(token_path) as f:
-    # If you get an error here, it means your token is formatted incorrectly. Did you put it in quotes?
-    tokens = json.load(f)
-    discord_token = tokens['discord']
-    perspective_key = tokens['perspective']
+class Report:
+    START_KEYWORD = "report"
+    CANCEL_KEYWORD = "cancel"
+    HELP_KEYWORD = "help"
 
-
-class ModBot(discord.Client):
-    def __init__(self, key):
-        intents = discord.Intents.default()
-        super().__init__(command_prefix='.', intents=intents)
-        self.group_num = None
-        self.mod_channels = {} # Map from guild to the mod channel id for that guild
-        self.reports = {} # Map from user IDs to the state of their report
-        self.perspective_key = key
-
-    async def on_ready(self):
-        print(f'{self.user.name} has connected to Discord! It is these guilds:')
-        for guild in self.guilds:
-            print(f' - {guild.name}')
-        print('Press Ctrl-C to quit.')
-
-        # Parse the group number out of the bot's name
-        match = re.search('[gG]roup (\d+) [bB]ot', self.user.name)
-        if match:
-            self.group_num = match.group(1)
-        else:
-            raise Exception("Group number not found in bot's name. Name format should be \"Group # Bot\".")
-
-        # Find the mod channel in each guild that this bot should report to
-        for guild in self.guilds:
-            for channel in guild.text_channels:
-                if channel.name == f'group-{self.group_num}-mod':
-                    self.mod_channels[guild.id] = channel
-
-    async def on_message(self, message):
+    def __init__(self, client):
+        self.state = State.REPORT_START
+        self.client = client
+        self.message = None
+        # I added these attributes to help user inputted store information
+        self.broadCategory = None
+        self.specificCategory = None
+        self.optionalMessage = None
+        self.postVisibility = None
+        self.userVisibility = None
+        self.upperBound = 0
+    
+    async def handle_message(self, message):
         '''
-        This function is called whenever a message is sent in a channel that the bot can see (including DMs). 
-        Currently the bot is configured to only handle messages that are sent over DMs or in your group's "group-#" channel. 
+        This function makes up the meat of the user-side reporting flow. It defines how we transition between states and what 
+        prompts to offer at each of those states. You're welcome to change anything you want; this skeleton is just here to
+        get you started and give you a model for working with Discord. 
         '''
-        # Ignore messages from the bot 
-        if message.author.id == self.user.id:
-            return
 
-        # Check if this message was sent in a server ("guild") or if it's a DM
-        if message.guild:
-            await self.handle_channel_message(message)
-        else:
-            await self.handle_dm(message)
+        if message.content == self.CANCEL_KEYWORD:
+            self.state = State.REPORT_COMPLETE
+            return ["Report cancelled."]
+        
+        if self.state == State.REPORT_START:
+            reply =  "Thank you for starting the reporting process. "
+            reply += "Say `help` at any time for more information.\n\n"
+            reply += "Please copy paste the link to the message you want to report.\n"
+            reply += "You can obtain this link by right-clicking the message and clicking `Copy Message Link`."
+            self.state = State.AWAITING_MESSAGE
+            return [reply]
+        
+        if self.state == State.AWAITING_MESSAGE:
+            # Parse out the three ID strings from the message link
+            m = re.search('/(\d+)/(\d+)/(\d+)', message.content)
+            if not m:
+                return ["I'm sorry, I couldn't read that link. Please try again or say `cancel` to cancel."]
+            guild = self.client.get_guild(int(m.group(1)))
+            if not guild:
+                return ["I cannot accept reports of messages from guilds that I'm not in. Please have the guild owner add me to the guild and try again."]
+            channel = guild.get_channel(int(m.group(2)))
+            if not channel:
+                return ["It seems this channel was deleted or never existed. Please try again or say `cancel` to cancel."]
+            try:
+                message = await channel.fetch_message(int(m.group(3)))
+            except discord.errors.NotFound:
+                return ["It seems this message was deleted or never existed. Please try again or say `cancel` to cancel."]
 
-    async def handle_dm(self, message):
-        # Handle a help message
-        if message.content == Report.HELP_KEYWORD:
-            reply =  "Use the `report` command to begin the reporting process.\n"
-            reply += "Use the `cancel` command to cancel the report process.\n"
-            await message.channel.send(reply)
-            return
+            # Here we've found the message - now have the user categorize it
+            self.state = State.MESSAGE_IDENTIFIED
+            reply =  "Enter `1` for Misinformation\n"
+            reply += "Enter `2` for Dangerous or Illegal Content\n"
+            reply += "Enter `3` for Harrassemnt or Abuse.\n"
+            reply += "Enter `4` for More Options\n"
+            reply += "Enter `5` for I don't want to see this content"
+            self.state = State.BROAD_CAT_IDENTIFIED
+            return ["Great, I found this message:", "```" + message.author.name + ": " + message.content + "```", \
+                    "What is the reason you are reporting this message? (Choose from below.)\n" + reply]
 
-        author_id = message.author.id
-        responses = []
+        if self.state == State.BROAD_CAT_IDENTIFIED:  
+            # TODO: store this information about what broad category of abuse the message falls under
+            # If there is invalid input, prompt the user to input again
+            if message.content not in {'1', '2', '3', '4', '5'}:
+                return["I'm sorry but I do not understand. Please enter a number from 1 to 4."]
+            # Otherwise, proceed by updating the state and populating variables
+            self.broadCategory = message.content
+            self.state = State.SPECIFIC_CAT_IDENTIFIED
+            self.upperBound = 4
+            if message.content == '1':
+                reply =  "Enter `1` for Elections\n"
+                reply += "Enter `2` for Covid-19\n"
+                reply += "Enter `3` for Other Health or Medical\n"
+                reply += "Enter `4` for Climate Change\n"
+                reply += "Enter `5` for Gun Violence\n"
+                reply += "Enter `6` for Other"
+                self.upperBound = 6
+                return ["What kind of misinformation is this? (Choose from below).\n" + reply]
+            if message.content == '2':
+                reply =  "Enter `1` for Expresses intentions of self-harm or suicide\n"
+                reply += "Enter `2` for Expresses intentions for harming others\n"
+                reply += "Enter `3` for Dangerous or Violent Organizations\n"
+                reply += "Enter `4` for Child Sexual Abuse Materials\n"
+                reply += "Enter `5` for Human Trafficking\n"
+                reply += "Enter `6` for Sale of Illegal Goods"
+                self.upperBound = 6
+                return ["What kind of dangerous or illegal content is this? (Choose from below).\n" + reply]
+            if message.content == '3':
+                reply =  "Enter `1` for Hate Speech or Symbols\n"
+                reply += "Enter `2` for Bullying\n"
+                reply += "Enter `3` for Sexual Harrassment\n"
+                reply += "Enter `4` for Stalking\n"
+                return ["What kind of harrassement of abuse is this? (Choose from below).\n" + reply]
+            if message.content == '4':
+                reply =  "Enter `1` for Spam\n"
+                reply += "Enter `2` for Copy Right Infringement\n"
+                reply += "Enter `3` for Impersonation\n"
+                reply += "Enter `4` for Other\n"
+                return ["Here are more options: (Choose from below).\n" + reply]
+        
+        if self.state == State.SPECIFIC_CAT_IDENTIFIED:
+            # If there is invalid input, prompt the user to input again
+            if not message.content.isdigit() or int(message.content) not in range(1, self.upperBound + 1):
+                return["I'm sorry but I do not understand. Please enter a number from 1 to " + str(self.upperBound) + "."]
+            # Otherwise, proceed by updating the state and recording the user input
+            self.specificCategory = message.content
+            self.state = State.OPTIONAL_MESSAGE
+            # Creating a reply variable so we can share link to CDC if user selected Covid-19 misinformation
+            reply = ""
+            if (self.broadCategory == '1') and (self.specificCategory == '2'):
+                reply = "\n\nAlso, here is the link to visit the CDC website for the latest information on Covid-19: https://www.cdc.gov/coronavirus/2019-ncov/index.html" 
+            return["If you would like to add more information to your report, here is space to do so. Enter your message when you are ready to proceed." + reply]
+        
+        if self.state == State.OPTIONAL_MESSAGE:
+            self.optionalMessage = message.content
+            self.state = State.POST_VISIBILITY
+            reply = "Thank you for your report. It will be reviewed by our content moderation team, who will decide future action, including if the post should be removed or the user banned."
+            if self.broadCategory == '1':
+                reply = "Thank you for your report. We will send this to our fact-checking partners and when misinformation is confimed, we will limit the content's distribution and warn other users."    
+            if self.broadCategory== '2':
+                reply = "Thank you for your report. It will be reviewed by our content moderation team, who will decide future action, including any necessary reports to law enforcement. Thank you for trying to keep our platform safe."
+            return[reply + "\n\nWould you like to no longer see posts by this user? Please enter `yes` or `no`."]
+        
+        if self.state == State.POST_VISIBILITY:
+            # If there is invalid input, prompt the user to input again
+            if message.content not in {'yes', 'no'}:
+                return["I'm sorry but I do not understand. Please enter `yes` or `no`. (Please use lowercase)."]
+            # Otherwise, proceed by updating the state and recording the user input
+            self.postVisibility = message.content
+            if message.content == 'yes':
+                self.state = State.USER_VISIBILITY
+                return["We can mute this user, so you can no longer see their posts, or we can block them so they cannot contact you at all. Which would you prefer? Please choose `mute` or `block`."]
+            if message.content == 'no':
+                self.state = State.REPORT_FINISHING
+            
+        if self.state == State.USER_VISIBILITY:
+            # If there is invalid input, prompt the user to input again
+            if message.content not in {'mute', 'block'}:
+                return["I'm sorry but I do not understand. Please enter `mute` or `block`. (Please use lowercase)."]
+            # Otherwise, proceed by updating the state and recording the user input
+            self.userVisibility = message.content
+            self.state = State.REPORT_FINISHING
+        
+        if self.state == State.REPORT_FINISHING:
+            # This part deviates from our original flow
+            reply = "Thank you for your report! Here is the information we got from you:"
+            reply += "\nThe message you reported falls under " + self.broadCategory
+            reply += ", and if more specifically related to " + self.specificCategory
+            reply += "\nWould you like to no longer see posts from the user who made the post you are reporting? " + self.postVisibility        
+            if self.postVisibility == 'yes':
+                reply += "\nHow would you like to change the status of the user's ability to interact with you? " + self.userVisibility
+            reply += "\n\nOnce again, we appreciate the report and will follow up with necessary changes."
+            self.state = State.REPORT_COMPLETE
+            return[reply]
+        
+        return []
 
-        # Only respond to messages if they're part of a reporting flow
-        if author_id not in self.reports and not message.content.startswith(Report.START_KEYWORD):
-            return
-
-        # If we don't currently have an active report for this user, add one
-        if author_id not in self.reports:
-            self.reports[author_id] = Report(self)
-
-        # Let the report class handle this message; forward all the messages it returns to uss
-        responses = await self.reports[author_id].handle_message(message)
-        for r in responses:
-            await message.channel.send(r)
-
-        # If the report is complete or cancelled, remove it from our map
-        if self.reports[author_id].report_complete():
-            self.reports.pop(author_id)
-
-    async def handle_channel_message(self, message):
-        # Only handle messages sent in the "group-#" channel
-        if not message.channel.name == f'group-{self.group_num}':
-            return
-
-        # Forward the message to the mod channel
-        mod_channel = self.mod_channels[message.guild.id]
-        await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
-
-        scores = self.eval_text(message)
-        await mod_channel.send(self.code_format(json.dumps(scores, indent=2)))
-
-    def eval_text(self, message):
-        '''
-        Given a message, forwards the message to Perspective and returns a dictionary of scores.
-        '''
-        PERSPECTIVE_URL = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze'
-
-        url = PERSPECTIVE_URL + '?key=' + self.perspective_key
-        data_dict = {
-            'comment': {'text': message.content},
-            'languages': ['en'],
-            'requestedAttributes': {
-                                    'SEVERE_TOXICITY': {}, 'PROFANITY': {},
-                                    'IDENTITY_ATTACK': {}, 'THREAT': {},
-                                    'TOXICITY': {}, 'FLIRTATION': {}
-                                },
-            'doNotStore': True
-        }
-        response = requests.post(url, data=json.dumps(data_dict))
-        response_dict = response.json()
-
-        scores = {}
-        for attr in response_dict["attributeScores"]:
-            scores[attr] = response_dict["attributeScores"][attr]["summaryScore"]["value"]
-
-        return scores
-
-    def code_format(self, text):
-        return "```" + text + "```"
-
-
-client = ModBot(perspective_key)
-client.run(discord_token)
+    def report_complete(self):
+        return self.state == State.REPORT_COMPLETE
+    
