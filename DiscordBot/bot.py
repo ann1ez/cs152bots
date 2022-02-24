@@ -1,6 +1,7 @@
 # bot.py
 import discord
 from discord.ext import commands
+from unidecode import unidecode # for disguised unicode characters
 import os
 import json
 import logging
@@ -113,6 +114,9 @@ class ModBot(discord.Client):
         '''
         Given a message, forwards the message to Perspective and returns a dictionary of scores.
         '''
+        # Transliterate unicode string into closest possible representation in ASCII text
+        message.content = unidecode(message.content)
+        
         PERSPECTIVE_URL = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze'
 
         url = PERSPECTIVE_URL + '?key=' + self.perspective_key
