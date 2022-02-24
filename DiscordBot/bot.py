@@ -1,12 +1,12 @@
 # bot.py
 import discord
 from discord.ext import commands
-from unidecode import unidecode # for disguised unicode characters
 import os
 import json
 import logging
 import re
 import requests
+import random
 from report import Report
 
 # Set up logging to the console
@@ -35,6 +35,7 @@ class ModBot(discord.Client):
         self.mod_channels = {} # Map from guild to the mod channel id for that guild
         self.reports = {} # Map from user IDs to the state of their report
         self.perspective_key = key
+        self.currReport = None
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
@@ -96,9 +97,66 @@ class ModBot(discord.Client):
 
         # If the report is complete or cancelled, remove it from our map
         if self.reports[author_id].report_complete():
+            # If the report was properly completed, finish flow on moderator's side
+            if not message.content == 'cancel':
+                reported_m = self.reports[author_id].reportedMessage
+                mod_channel = self.mod_channels[reported_m.guild.id]
+                await mod_channel.send(self.report_mod_message(message))
             self.reports.pop(author_id)
 
+    def report_mod_message(self, message):       
+        author_id = message.author.id
+        self.currReport = self.reports[author_id]
+        reported_m = self.reports[author_id].reportedMessage
+        
+        # Foward the complete report to the mod channel
+        reply = "NEW REPORT \nmade by `" + message.author.name + "` regarding a post by `" + reported_m.author.name + "`"
+        reply += "\n• The message reported falls under **" + self.reports[author_id].broadCategory + "**"
+        reply += "\n• And is more specifically related to **" + self.reports[author_id].specificCategory + "**"
+        reply += "\n• Here is an optional message from the reporter: **" + self.reports[author_id].optionalMessage + "**"
+        reply += "\n• Would the reporter like to no longer see posts from the same user? **" + self.reports[author_id].postVisibility + "**"       
+        if self.reports[author_id].postVisibility == 'yes':
+            reply += "\nHow would the reporter like to change the status of the offending user's relationship with them? **" + self.reports[author_id].userVisibility + "**"
+        reply += "\n\n And here is the message content: ```" + reported_m.content + "```"
+        if self.currReport.broadCategory == 'Misinformation':
+            reply += "\nIs a response necessary? Please enter `yes`, `no`, or `unclear`."
+        else:
+            reply += "\nIs a response necessary? Please enter `yes` or `no`."
+        return reply
+
+    async def handle_mod_message(self, message): 
+        mod_channel = self.mod_channels[message.guild.id]
+        if message.content == 'yes':
+            # Post needs to be removed
+            await self.currReport.reportedMessage.add_reaction('❌') 
+            await mod_channel.send("This post has been deleted. This post removal is symbolized by the ❌ reaction on it.")
+        elif self.currReport.broadCategory == 'Misinformation':
+            # If not misinfo but high risk, add warning (DIFF from flow)
+            if message.content == 'no' and self.currReport.specificCategory in {'Elections', 'Covid-19', 'Other Health or Medical'}:
+                await self.currReport.reportedMessage.add_reaction('⭕') 
+                await mod_channel.send("This post has a warning label now. This warning is symbolized by the ⭕ reaction on it.")
+            if message.content == 'unclear':
+                # send to fact checker function
+                if random.randrange(100) < 50:
+                    await self.currReport.reportedMessage.add_reaction('❌') 
+                    await mod_channel.send("This post has been classified as false by the fact checker so it had been deleted. This post removal is symbolized by the ❌ reaction on it.")
+                else:
+                    await self.handle_special_cases() 
+                    await mod_channel.send("This post has been classified as true by the fact checker so it has only been de-prioritized and given a warning label. These actions are symbolized by the 🔻 and ⭕ reactions respectively.")
+        return 
+    
+    async def handle_special_cases(self):
+        # Check if it is high risk
+        if self.currReport.specificCategory in {'Elections', 'Covid-19', 'Other Health or Medical'}:
+            await self.currReport.reportedMessage.add_reaction('🔻') # this emoji represents de-prioritization (ie shown to less people) 
+            await self.currReport.reportedMessage.add_reaction('⭕') # this emoji represents a warning label
+        return
+
     async def handle_channel_message(self, message):
+        # Send the info to mod funtion if necessary
+        if message.channel.name == f'group-{self.group_num}-mod':
+            await self.handle_mod_message(message)
+
         # Only handle messages sent in the "group-#" channel
         if not message.channel.name == f'group-{self.group_num}':
             return
@@ -114,9 +172,6 @@ class ModBot(discord.Client):
         '''
         Given a message, forwards the message to Perspective and returns a dictionary of scores.
         '''
-        # Transliterate unicode string into closest possible representation in ASCII text
-        message.content = unidecode(message.content)
-        
         PERSPECTIVE_URL = 'https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze'
 
         url = PERSPECTIVE_URL + '?key=' + self.perspective_key
