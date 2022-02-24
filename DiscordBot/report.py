@@ -29,6 +29,7 @@ class Report:
         self.optionalMessage = None
         self.postVisibility = None
         self.userVisibility = None
+        self.upperBound = 0
     
     async def handle_message(self, message):
         '''
@@ -75,12 +76,16 @@ class Report:
             self.state = State.BROAD_CAT_IDENTIFIED
             return ["Great, I found this message:", "```" + message.author.name + ": " + message.content + "```", \
                     "What is the reason you are reporting this message? (Choose from below.)\n" + reply]
-          
-        if self.state == State.BROAD_CAT_IDENTIFIED:
-            # TODO: Check if the input is valid
+
+        if self.state == State.BROAD_CAT_IDENTIFIED:  
             # TODO: store this information about what broad category of abuse the message falls under
+            # If there is invalid input, prompt the user to input again
+            if message.content not in {'1', '2', '3', '4', '5'}:
+                return["I'm sorry but I do not understand. Please enter a number from 1 to 4."]
+            # Otherwise, proceed by updating the state and populating variables
             self.broadCategory = message.content
             self.state = State.SPECIFIC_CAT_IDENTIFIED
+            self.upperBound = 4
             if message.content == '1':
                 reply =  "Enter `1` for Elections\n"
                 reply += "Enter `2` for Covid-19\n"
@@ -88,6 +93,7 @@ class Report:
                 reply += "Enter `4` for Climate Change\n"
                 reply += "Enter `5` for Gun Violence\n"
                 reply += "Enter `6` for Other"
+                self.upperBound = 6
                 return ["What kind of misinformation is this? (Choose from below).\n" + reply]
             if message.content == '2':
                 reply =  "Enter `1` for Expresses intentions of self-harm or suicide\n"
@@ -96,6 +102,7 @@ class Report:
                 reply += "Enter `4` for Child Sexual Abuse Materials\n"
                 reply += "Enter `5` for Human Trafficking\n"
                 reply += "Enter `6` for Sale of Illegal Goods"
+                self.upperBound = 6
                 return ["What kind of dangerous or illegal content is this? (Choose from below).\n" + reply]
             if message.content == '3':
                 reply =  "Enter `1` for Hate Speech or Symbols\n"
@@ -111,7 +118,10 @@ class Report:
                 return ["Here are more options: (Choose from below).\n" + reply]
         
         if self.state == State.SPECIFIC_CAT_IDENTIFIED:
-            # TODO: Check if the input is valid
+            # If there is invalid input, prompt the user to input again
+            if not message.content.isdigit() or int(message.content) not in range(1, self.upperBound + 1):
+                return["I'm sorry but I do not understand. Please enter a number from 1 to " + str(self.upperBound) + "."]
+            # Otherwise, proceed by updating the state and recording the user input
             self.specificCategory = message.content
             self.state = State.OPTIONAL_MESSAGE
             # Creating a reply variable so we can share link to CDC if user selected Covid-19 misinformation
@@ -131,6 +141,10 @@ class Report:
             return[reply + "\n\nWould you like to no longer see posts by this user? Please enter `yes` or `no`."]
         
         if self.state == State.POST_VISIBILITY:
+            # If there is invalid input, prompt the user to input again
+            if message.content not in {'yes', 'no'}:
+                return["I'm sorry but I do not understand. Please enter `yes` or `no`. (Please use lowercase)."]
+            # Otherwise, proceed by updating the state and recording the user input
             self.postVisibility = message.content
             if message.content == 'yes':
                 self.state = State.USER_VISIBILITY
@@ -139,6 +153,10 @@ class Report:
                 self.state = State.REPORT_FINISHING
             
         if self.state == State.USER_VISIBILITY:
+            # If there is invalid input, prompt the user to input again
+            if message.content not in {'mute', 'block'}:
+                return["I'm sorry but I do not understand. Please enter `mute` or `block`. (Please use lowercase)."]
+            # Otherwise, proceed by updating the state and recording the user input
             self.userVisibility = message.content
             self.state = State.REPORT_FINISHING
         
@@ -148,6 +166,9 @@ class Report:
             reply += "\nThe message you reported falls under " + self.broadCategory
             reply += ", and if more specifically related to " + self.specificCategory
             reply += "\nWould you like to no longer see posts from the user who made the post you are reporting? " + self.postVisibility        
+            if self.postVisibility == 'yes':
+                reply += "\nHow would you like to change the status of the user's ability to interact with you? " + self.userVisibility
+            reply += "\n\nOnce again, we appreciate the report and will follow up with necessary changes."
             self.state = State.REPORT_COMPLETE
             return[reply]
         
@@ -155,4 +176,7 @@ class Report:
 
     def report_complete(self):
         return self.state == State.REPORT_COMPLETE
+    
+
+
     
