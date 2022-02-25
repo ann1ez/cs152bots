@@ -1,4 +1,5 @@
 from enum import Enum, auto
+from unidecode import unidecode # for disguised unicode characters
 import discord
 import re
 
@@ -69,10 +70,13 @@ class Report:
 
             # Here we've found the message - now have the user categorize it
             self.state = State.MESSAGE_IDENTIFIED
+
+            # Transliterate unicode string into closest possible representation in ASCII text
+            message.content = unidecode(message.content)
             self.reportedMessage = message
             reply =  "Enter `1` for Misinformation\n"
             reply += "Enter `2` for Dangerous or Illegal Content\n"
-            reply += "Enter `3` for Harassemnt or Abuse.\n"
+            reply += "Enter `3` for Harassment or Abuse.\n"
             reply += "Enter `4` for More Options\n"
             reply += "Enter `5` for I don't want to see this content"
             self.state = State.BROAD_CAT_IDENTIFIED

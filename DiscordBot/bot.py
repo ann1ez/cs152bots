@@ -128,6 +128,17 @@ class ModBot(discord.Client):
             reply += "\nIs a response necessary? Please enter `yes` or `no`."
         return reply
 
+    def report_mod_flagged(self, message):
+        author_id = "auto"
+        self.currReport = self.reports[author_id]
+        reported_m = self.reports[author_id].reportedMessage
+
+        # Foward the complete report to the mod channel
+        reply = "NEW REPORT \nmade by `COVID-19 misinformation Bot " + "` regarding a post by `" + reported_m.author.name + "`"
+        reply += "\n\n And here is the message content: ```" + reported_m.content + "```"
+        reply += "\nIs a response necessary? Please enter `yes` or `no`."
+        return reply
+
     def report_mod_edit(self, message):
         author_id = message.author.id
         self.currReport = self.reports[author_id]
@@ -153,11 +164,12 @@ class ModBot(discord.Client):
 
     async def handle_mod_message(self, message): 
         mod_channel = self.mod_channels[message.guild.id]
+        author_id = self.currReport.author.id
         if message.content == 'yes':
             # Post needs to be removed
             await self.currReport.reportedMessage.add_reaction('❌') 
             await mod_channel.send("This post has been deleted. This post removal is symbolized by the ❌ reaction on it.")
-        elif self.currReport.broadCategory == 'Misinformation':
+        elif author_id != "auto" and self.currReport.broadCategory == 'Misinformation':
             # If not misinfo but high risk, add warning (DIFF from flow)
             if message.content == 'no' and self.currReport.specificCategory in {'Elections', 'Covid-19', 'Other Health or Medical'}:
                 await self.currReport.reportedMessage.add_reaction('⭕') 
@@ -170,7 +182,8 @@ class ModBot(discord.Client):
                 else:
                     await self.handle_special_cases() 
                     await mod_channel.send("This post has been classified as true by the fact checker so it has only been de-prioritized and given a warning label. These actions are symbolized by the 🔻 and ⭕ reactions respectively.")
-        return 
+
+        return
     
     async def handle_special_cases(self):
         # Check if it is high risk
@@ -183,6 +196,7 @@ class ModBot(discord.Client):
         # Send the info to mod function if necessary
         if message.channel.name == f'group-{self.group_num}-mod':
             await self.handle_mod_message(message)
+            return
 
         # Only handle messages sent in the "group-#" channel
         if not message.channel.name == f'group-{self.group_num}':
@@ -194,6 +208,10 @@ class ModBot(discord.Client):
 
         scores = self.eval_text(message)
         await mod_channel.send(self.code_format(json.dumps(scores, indent=2)))
+
+        # if toxic, automatic flag and generate report to mod channel
+        if scores["TOXICITY"] > 0.8 or scores["SEVERE_TOXICITY"] > 0.8:
+            await mod_channel.send(self.report_mod_flagged(message))
 
     async def handle_channel_edit(self, message):
         # Send the info to mod function if necessary
