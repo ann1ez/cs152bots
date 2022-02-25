@@ -170,10 +170,10 @@ class ModBot(discord.Client):
             await self.currReport.reportedMessage.add_reaction('❌') 
             await mod_channel.send("This post has been deleted. This post removal is symbolized by the ❌ reaction on it.")
         elif author_id != "auto" and self.currReport.broadCategory == 'Misinformation':
-            # If not misinfo but high risk, add warning (DIFF from flow)
-            if message.content == 'no' and self.currReport.specificCategory in {'Elections', 'Covid-19', 'Other Health or Medical'}:
-                await self.currReport.reportedMessage.add_reaction('⭕') 
-                await mod_channel.send("This post has a warning label now. This warning is symbolized by the ⭕ reaction on it.")
+            # If not misinfo but high risk, add warning and de prioritize
+            if message.content == 'no':
+                await self.handle_special_cases() 
+                await mod_channel.send("This post has been de-prioritized and given a warning label. These actions are symbolized by the 🔻 and ⭕ reactions respectively")
             if message.content == 'unclear':
                 # send to fact checker function
                 if random.randrange(100) < 50:
