@@ -73,11 +73,7 @@ class ModBot(discord.Client):
             await self.handle_dm(message)
 
     async def on_message_edit(self, before, after):
-        # Check if this message was sent in a server ("guild") or if it's a DM
-        if after.guild:
-            await self.handle_channel_edit(after)
-        # else:
-            # await self.handle_dm(after)
+        await self.handle_channel_edit(after)
 
     async def handle_dm(self, message):
         # Handle a help message
