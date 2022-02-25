@@ -72,6 +72,13 @@ class ModBot(discord.Client):
         else:
             await self.handle_dm(message)
 
+    async def on_message_edit(self, before, after):
+        # Check if this message was sent in a server ("guild") or if it's a DM
+        if after.guild:
+            await self.handle_channel_edit(after)
+        # else:
+            # await self.handle_dm(after)
+
     async def handle_dm(self, message):
         # Handle a help message
         if message.content == Report.HELP_KEYWORD:
@@ -91,7 +98,7 @@ class ModBot(discord.Client):
         if author_id not in self.reports:
             self.reports[author_id] = Report(self)
 
-        # Let the report class handle this message; forward all the messages it returns to uss
+        # Let the report class handle this message; forward all the messages it returns to us
         responses = await self.reports[author_id].handle_message(message)
         for r in responses:
             await message.channel.send(r)
@@ -118,6 +125,29 @@ class ModBot(discord.Client):
         reply += "\n• Would the reporter like to no longer see posts from the same user? **" + self.reports[author_id].postVisibility + "**"       
         if self.reports[author_id].postVisibility == 'yes':
             reply += "\nHow would the reporter like to change the status of the offending user's relationship with them? **" + self.reports[author_id].userVisibility + "**"
+        reply += "\n\n And here is the message content: ```" + reported_m.content + "```"
+        if self.currReport.broadCategory == 'Misinformation':
+            reply += "\nIs a response necessary? Please enter `yes`, `no`, or `unclear`."
+        else:
+            reply += "\nIs a response necessary? Please enter `yes` or `no`."
+        return reply
+
+    def report_mod_edit(self, message):
+        author_id = message.author.id
+        self.currReport = self.reports[author_id]
+        reported_m = self.reports[author_id].reportedMessage
+
+        # Foward the complete report to the mod channel
+        reply = "NEW REPORT \nmade by `" + message.author.name + "` regarding a post by `" + reported_m.author.name + "`"
+        reply += "\n• The message reported falls under **" + self.reports[author_id].broadCategory + "**"
+        reply += "\n• And is more specifically related to **" + self.reports[author_id].specificCategory + "**"
+        reply += "\n• Here is an optional message from the reporter: **" + self.reports[
+            author_id].optionalMessage + "**"
+        reply += "\n• Would the reporter like to no longer see posts from the same user? **" + self.reports[
+            author_id].postVisibility + "**"
+        if self.reports[author_id].postVisibility == 'yes':
+            reply += "\nHow would the reporter like to change the status of the offending user's relationship with them? **" + \
+                     self.reports[author_id].userVisibility + "**"
         reply += "\n\n And here is the message content: ```" + reported_m.content + "```"
         if self.currReport.broadCategory == 'Misinformation':
             reply += "\nIs a response necessary? Please enter `yes`, `no`, or `unclear`."
@@ -154,7 +184,7 @@ class ModBot(discord.Client):
         return
 
     async def handle_channel_message(self, message):
-        # Send the info to mod funtion if necessary
+        # Send the info to mod function if necessary
         if message.channel.name == f'group-{self.group_num}-mod':
             await self.handle_mod_message(message)
 
@@ -165,6 +195,22 @@ class ModBot(discord.Client):
         # Forward the message to the mod channel
         mod_channel = self.mod_channels[message.guild.id]
         await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
+
+        scores = self.eval_text(message)
+        await mod_channel.send(self.code_format(json.dumps(scores, indent=2)))
+
+    async def handle_channel_edit(self, message):
+        # Send the info to mod function if necessary
+        if message.channel.name == f'group-{self.group_num}-mod':
+            await self.handle_mod_message(message)
+
+        # Only handle messages sent in the "group-#" channel
+        if not message.channel.name == f'group-{self.group_num}':
+            return
+
+        # Forward the message to the mod channel
+        mod_channel = self.mod_channels[message.guild.id]
+        await mod_channel.send(f'ALERT: message has been edited! Forwarded message:\n{message.author.name}: "{message.content}"')
 
         scores = self.eval_text(message)
         await mod_channel.send(self.code_format(json.dumps(scores, indent=2)))
