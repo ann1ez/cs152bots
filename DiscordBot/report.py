@@ -30,6 +30,7 @@ class Report:
         self.postVisibility = None
         self.userVisibility = None
         self.upperBound = 0
+        self.reportedMessage = None
     
     async def handle_message(self, message):
         '''
@@ -68,9 +69,10 @@ class Report:
 
             # Here we've found the message - now have the user categorize it
             self.state = State.MESSAGE_IDENTIFIED
+            self.reportedMessage = message
             reply =  "Enter `1` for Misinformation\n"
             reply += "Enter `2` for Dangerous or Illegal Content\n"
-            reply += "Enter `3` for Harrassemnt or Abuse.\n"
+            reply += "Enter `3` for Harassemnt or Abuse.\n"
             reply += "Enter `4` for More Options\n"
             reply += "Enter `5` for I don't want to see this content"
             self.state = State.BROAD_CAT_IDENTIFIED
@@ -81,7 +83,7 @@ class Report:
             # TODO: store this information about what broad category of abuse the message falls under
             # If there is invalid input, prompt the user to input again
             if message.content not in {'1', '2', '3', '4', '5'}:
-                return["I'm sorry but I do not understand. Please enter a number from 1 to 4."]
+                return["I'm sorry but I do not understand. Please enter a number from 1 to 5."]
             # Otherwise, proceed by updating the state and populating variables
             self.broadCategory = message.content
             self.state = State.SPECIFIC_CAT_IDENTIFIED
@@ -107,22 +109,27 @@ class Report:
             if message.content == '3':
                 reply =  "Enter `1` for Hate Speech or Symbols\n"
                 reply += "Enter `2` for Bullying\n"
-                reply += "Enter `3` for Sexual Harrassment\n"
+                reply += "Enter `3` for Sexual Harassment\n"
                 reply += "Enter `4` for Stalking\n"
-                return ["What kind of harrassement of abuse is this? (Choose from below).\n" + reply]
+                return ["What kind of harassement of abuse is this? (Choose from below).\n" + reply]
             if message.content == '4':
                 reply =  "Enter `1` for Spam\n"
-                reply += "Enter `2` for Copy Right Infringement\n"
+                reply += "Enter `2` for Copyright Infringement\n"
                 reply += "Enter `3` for Impersonation\n"
                 reply += "Enter `4` for Other\n"
                 return ["Here are more options: (Choose from below).\n" + reply]
+
         
         if self.state == State.SPECIFIC_CAT_IDENTIFIED:
+            # Treats the "I don't want to see" option as a special case
+            if self.broadCategory == '5':
+                self.specificCategory = '0'
             # If there is invalid input, prompt the user to input again
-            if not message.content.isdigit() or int(message.content) not in range(1, self.upperBound + 1):
+            elif not message.content.isdigit() or int(message.content) not in range(1, self.upperBound + 1):
                 return["I'm sorry but I do not understand. Please enter a number from 1 to " + str(self.upperBound) + "."]
             # Otherwise, proceed by updating the state and recording the user input
-            self.specificCategory = message.content
+            else:
+                self.specificCategory = message.content
             self.state = State.OPTIONAL_MESSAGE
             # Creating a reply variable so we can share link to CDC if user selected Covid-19 misinformation
             reply = ""
@@ -161,10 +168,23 @@ class Report:
             self.state = State.REPORT_FINISHING
         
         if self.state == State.REPORT_FINISHING:
+            # Translating the categories from numbers to word expressions
+            broadCategories = ['', 'Misinformation', 'Dangerous or Illegal Content', 'Harassment or Abuse', 'More Options', 'I do not want to see this content']
+            specificCategories = [
+                [],
+                ['', 'Elections', 'Covid-19', 'Other Health or Medical', 'Climate Change', 'Gun Violence', 'Other'],
+                ['', 'Expresses intentions of self-harm or suicide', 'Expresses intentions for harming others', 'Dangerous or Violent Organizations', 'Child Sexual Abuse Materials', 'Human Trafficking', 'Sale of Illegal Goods'],
+                ['', 'Hate Speech or Symbols', 'Bullying', 'Sexual Harassment', 'Stalking'],
+                ['', 'Spam', 'Copyright Infringement', 'Impersonation', 'Other'],
+                ['Not applicable']
+            ]
+            self.specificCategory = specificCategories[int(self.broadCategory)][int(self.specificCategory)]
+            self.broadCategory = broadCategories[int(self.broadCategory)]
+
             # This part deviates from our original flow
             reply = "Thank you for your report! Here is the information we got from you:"
             reply += "\nThe message you reported falls under " + self.broadCategory
-            reply += ", and if more specifically related to " + self.specificCategory
+            reply += ", and is more specifically related to " + self.specificCategory
             reply += "\nWould you like to no longer see posts from the user who made the post you are reporting? " + self.postVisibility        
             if self.postVisibility == 'yes':
                 reply += "\nHow would you like to change the status of the user's ability to interact with you? " + self.userVisibility
@@ -180,3 +200,4 @@ class Report:
 
 
     
+
