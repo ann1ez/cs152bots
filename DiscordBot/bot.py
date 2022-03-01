@@ -164,7 +164,7 @@ class ModBot(discord.Client):
 
     async def handle_mod_message(self, message): 
         mod_channel = self.mod_channels[message.guild.id]
-        author_id = self.currReport.author.id
+        author_id = self.currReport.reportedMessage.author.id 
         if message.content == 'yes':
             # Post needs to be removed
             await self.currReport.reportedMessage.add_reaction('❌') 
@@ -211,6 +211,9 @@ class ModBot(discord.Client):
 
         # if toxic, automatic flag and generate report to mod channel
         if scores["TOXICITY"] > 0.8 or scores["SEVERE_TOXICITY"] > 0.8:
+            report = Report(self)
+            report.reportedMessage = message
+            self.reports['auto'] = report
             await mod_channel.send(self.report_mod_flagged(message))
 
     async def handle_channel_edit(self, message):
