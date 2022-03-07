@@ -10,6 +10,8 @@ import requests
 import random
 from report import Report
 
+N_THRESHOLD = 2
+
 # Set up logging to the console
 logger = logging.getLogger('discord')
 logger.setLevel(logging.DEBUG)
@@ -37,6 +39,7 @@ class ModBot(discord.Client):
         self.reports = {} # Map from user IDs to the state of their report
         self.perspective_key = key
         self.currReport = None
+        self.karma = {}  # Map from user IDs to the number of times they've been reported
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
@@ -94,6 +97,10 @@ class ModBot(discord.Client):
         if author_id not in self.reports:
             self.reports[author_id] = Report(self)
 
+        # If no track record of author_id, add one
+        if author_id not in self.karma:
+            self.karma[author_id] = 0
+
         # Let the report class handle this message; forward all the messages it returns to us
         responses = await self.reports[author_id].handle_message(message)
         for r in responses:
@@ -103,6 +110,7 @@ class ModBot(discord.Client):
         if self.reports[author_id].report_complete():
             # If the report was properly completed, finish flow on moderator's side
             if not message.content == 'cancel':
+                self.karma[author_id] += 1          # increment author_id record by one
                 reported_m = self.reports[author_id].reportedMessage
                 mod_channel = self.mod_channels[reported_m.guild.id]
                 await mod_channel.send(self.report_mod_message(message))
@@ -122,6 +130,9 @@ class ModBot(discord.Client):
         if self.reports[author_id].postVisibility == 'yes':
             reply += "\nHow would the reporter like to change the status of the offending user's relationship with them? **" + self.reports[author_id].userVisibility + "**"
         reply += "\n\n And here is the message content: ```" + reported_m.content + "```"
+        if self.karma[author_id] >= N_THRESHOLD:
+            reply += "ATTENTION: This user has been reported " + str(N_THRESHOLD) + " times. It may be appropriate to take further action by restricting this user."
+
         if self.currReport.broadCategory == 'Misinformation':
             reply += "\nIs a response necessary? Please enter `yes`, `no`, or `unclear`."
         else:
@@ -193,6 +204,10 @@ class ModBot(discord.Client):
         return
 
     async def handle_channel_message(self, message):
+        if message.content[-4:] == '!pin':
+            await message.pin(reason=None)
+                #self.client.pin_message(message)
+
         # Send the info to mod function if necessary
         if message.channel.name == f'group-{self.group_num}-mod':
             await self.handle_mod_message(message)
