@@ -32,6 +32,7 @@ class Report:
         self.userVisibility = None
         self.upperBound = 0
         self.reportedMessage = None
+        self.reporter = None
     
     async def handle_message(self, message):
         '''
@@ -200,8 +201,5 @@ class Report:
 
     def report_complete(self):
         return self.state == State.REPORT_COMPLETE
-    
-
-
     
 
