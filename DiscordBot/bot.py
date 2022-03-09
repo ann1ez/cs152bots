@@ -2,6 +2,7 @@
 import discord
 from discord.ext import commands
 from unidecode import unidecode # for disguised unicode characters
+from simpletransformers.classification import ClassificationModel # for loading Simple Transformer classification model
 import os
 import json
 import logging
@@ -11,6 +12,7 @@ import random
 from report import Report
 
 N_THRESHOLD = 2
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Set up logging to the console
 logger = logging.getLogger('discord')
@@ -43,6 +45,8 @@ class ModBot(discord.Client):
         self.currReport = None
         self.karma = {}  # Map from user IDs to the number of times they've been reported
         self.queue = [] # List for the queue of user reports waiting for moderator response
+        # Loading our saved Simple Transformer classifier model
+        self.model = ClassificationModel(model_type='roberta', model_name='checkpoint-3750-epoch-10', use_cuda=False) 
 
     async def on_ready(self):
         print(f'{self.user.name} has connected to Discord! It is these guilds:')
@@ -206,12 +210,10 @@ class ModBot(discord.Client):
         mod_channel = self.mod_channels[message.guild.id]
         await mod_channel.send(f'Forwarded message:\n{message.author.name}: "{message.content}"')
 
-        scores = self.eval_text(message)
-        await mod_channel.send(self.code_format(json.dumps(scores, indent=2)))
-
-        # if toxic, automatic flag and generate report to mod channel
-        if scores["TOXICITY"] > 0.8 or scores["SEVERE_TOXICITY"] > 0.8:
-            # Creating a report
+        # Use the classifier to determine if the message contains misinformation
+        predictions, raw_output = self.model.predict([message.content])
+        if predictions[0] == 0 or predictions[0] == 2:
+            # If content is COVID misinformation, automatic flag and generate report to mod channel
             report = Report(self)
             report.reportedMessage = message
             report.reporter = 'auto'
